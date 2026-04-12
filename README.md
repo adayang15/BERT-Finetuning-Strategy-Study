@@ -1,1 +1,1 @@
-# BERT-Finetuning-Strategy-Study
+# BERT Finetuning Strategy Study
