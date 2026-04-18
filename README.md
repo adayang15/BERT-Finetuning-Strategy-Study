@@ -1,146 +1,27 @@
-# BERT Fine-tuning Strategy Study
+# BERT-Finetuning-Strategy-Study
 
-An empirical benchmark comparing five fine-tuning strategies for BERT on the SST-2 sentiment classification task, focusing on the trade-offs between parameter efficiency and model performance.
+Empirical comparison of five fine-tuning strategies for BERT on the SST-2 binary sentiment classification task. The study benchmarks full fine-tuning against two layer-freezing variants and two Low-Rank Adaptation (LoRA) configurations, examining the trade-offs between trainable parameter count, classification accuracy, and data efficiency across different training set sizes.
 
-## Overview
+## Topics Covered
 
-This project systematically studies how different fine-tuning approaches affect accuracy, parameter efficiency, and data efficiency when adapting `bert-base-uncased` to downstream NLP tasks.
+**Dataset and Preprocessing**
+The SST-2 dataset from the GLUE benchmark is loaded via HuggingFace Datasets. Each sentence is tokenized using the `bert-base-uncased` WordPiece tokenizer with padding and truncation applied to a maximum sequence length of 128 tokens. To support data efficiency experiments, the data loader accepts a fractional subset parameter that samples a fixed proportion of the training split while preserving label distribution.
 
-**Strategies compared:**
+**Fine-tuning Strategies**
 
-| Strategy | Trainable Layers | Method |
-|---|---|---|
-| `full_finetune` | All layers | Full fine-tuning (baseline) |
-| `frozen_6_layers` | Last 6 encoder layers + classifier | Layer freezing |
-| `frozen_10_layers` | Last 2 encoder layers + classifier | Layer freezing |
-| `lora_r8` | LoRA adapters (r=8) + classifier | Low-Rank Adaptation |
-| `lora_r16` | LoRA adapters (r=16) + classifier | Low-Rank Adaptation |
+*Full Fine-tuning:* All parameters of `BertForSequenceClassification` — embeddings, all twelve encoder layers, and the classification head — are updated during training. This serves as the performance upper bound against which parameter-efficient methods are evaluated.
 
-**Research questions:**
-- What is the accuracy cost of freezing transformer layers?
-- Can LoRA match full fine-tuning with far fewer trainable parameters?
-- Which strategy is most sample-efficient under limited data?
+*Layer Freezing (6 layers):* The embedding layer and the first six transformer encoder layers are frozen. Only the upper six encoder layers and the classification head remain trainable. This reduces the number of gradient updates per step while retaining the higher-level contextual representations that are most task-relevant.
 
-## Project Structure
+*Layer Freezing (10 layers):* A more aggressive freezing schedule that retains only the last two encoder layers and the classification head as trainable. This configuration tests how much task-specific adaptation can be achieved with a minimal slice of the network.
 
-```
-BERT-Finetuning-Strategy-Study/
-├── configs/
-│   ├── base.yaml               # Shared training hyperparameters
-│   ├── full_finetune.yaml
-│   ├── frozen_6_layers.yaml
-│   ├── frozen_10_layers.yaml
-│   ├── lora_r8.yaml
-│   └── lora_r16.yaml
-├── src/
-│   ├── models.py               # Model builder (BERT + LoRA / frozen variants)
-│   ├── lora.py                 # Custom LoRA implementation (no peft dependency)
-│   ├── data.py                 # SST-2 data loading and tokenization
-│   ├── trainer.py              # Training loop, AdamW + linear warmup
-│   └── utils.py                # Config loading, logging, metrics, seeding
-├── scripts/
-│   ├── train.py                # Train a single strategy
-│   ├── evaluate.py             # Compare all strategies, generate plots
-│   └── ablation.py             # Data efficiency study (10% / 50% / 100%)
-├── requirements.txt
-└── setup.py
-```
+*LoRA (rank 8) and LoRA (rank 16):* Low-Rank Adaptation injects trainable low-rank matrices into the query and value projection layers of each attention head, leaving all original weights frozen. The forward pass computes `W_original(x) + (x @ A @ B) * (alpha / r)`, where `A` is initialized from a Gaussian distribution and `B` is initialized to zero, ensuring the adapter contributes nothing at the start of training. Rank 8 and rank 16 are compared to assess the sensitivity of LoRA to the expressiveness of its low-rank decomposition. The LoRA implementation is written from scratch without relying on the `peft` library.
 
-## Setup
+**Training Setup**
+All strategies share a common training configuration: AdamW optimizer, linear learning rate warmup over the first 10% of training steps followed by linear decay, batch size of 32, maximum gradient norm of 1.0, and a fixed random seed for reproducibility. Each strategy is trained for 5 epochs. Per-epoch accuracy, macro F1 score, loss, and wall-clock time are recorded to `results/` as both JSON and CSV.
 
-**Requirements:** Python >= 3.8, PyTorch >= 2.0
+**Evaluation and Visualization**
+After all five strategies are trained, a separate evaluation script aggregates results and generates two figures: an accuracy comparison bar chart and a parameter efficiency scatter plot that places each strategy in the space of trainable parameter count versus validation accuracy on a log scale. This plot makes the accuracy-efficiency frontier directly visible.
 
-```bash
-git clone https://github.com/your-username/BERT-Finetuning-Strategy-Study.git
-cd BERT-Finetuning-Strategy-Study
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Train a single strategy
-
-```bash
-python scripts/train.py --config configs/full_finetune.yaml
-python scripts/train.py --config configs/frozen_6_layers.yaml
-python scripts/train.py --config configs/frozen_10_layers.yaml
-python scripts/train.py --config configs/lora_r8.yaml
-python scripts/train.py --config configs/lora_r16.yaml
-```
-
-Each run writes to `results/` (JSON + CSV metrics, log file).
-
-### Compare all strategies
-
-```bash
-# Run after all five training jobs complete
-python scripts/evaluate.py
-```
-
-Generates:
-- `figures/accuracy_comparison.png` — bar chart of final validation accuracy
-- `figures/params_vs_accuracy.png` — parameter efficiency scatter plot
-
-### Data efficiency ablation
-
-```bash
-python scripts/ablation.py
-```
-
-Trains all five strategies at 10%, 50%, and 100% of the training set (3 epochs each) and produces `figures/data_efficiency.png`.
-
-## Configuration
-
-Training uses a two-level YAML config system. `configs/base.yaml` holds shared defaults:
-
-```yaml
-training:
-  batch_size: 32
-  num_epochs: 5
-  learning_rate: 2.0e-5
-  weight_decay: 0.01
-  warmup_ratio: 0.1
-  max_grad_norm: 1.0
-  seed: 42
-data:
-  max_length: 128
-```
-
-Strategy configs override or extend these values. To add a new strategy, create a new YAML file and pass it via `--config`.
-
-## LoRA Implementation
-
-LoRA is implemented from scratch in [`src/lora.py`](src/lora.py) without the `peft` library. A `LoRALinear` wrapper replaces the query and value projection matrices in each attention layer:
-
-```
-output = W_original(x) + (x @ A @ B) * (alpha / r)
-```
-
-where `A` and `B` are low-rank matrices initialized as Gaussian and zero respectively.
-
-## Outputs
-
-| File | Description |
-|---|---|
-| `results/{strategy}.json` | Final metrics + per-epoch training history |
-| `results/{strategy}_log.csv` | Epoch-level loss, accuracy, F1, runtime |
-| `results/{strategy}.log` | Full training log |
-| `figures/accuracy_comparison.png` | Strategy accuracy comparison |
-| `figures/params_vs_accuracy.png` | Trainable params vs. accuracy |
-| `figures/data_efficiency.png` | Accuracy vs. training data fraction |
-
-## Dependencies
-
-```
-torch >= 2.0
-transformers >= 4.35
-datasets >= 2.14
-scikit-learn >= 1.3
-matplotlib >= 3.7
-numpy >= 1.24
-pyyaml >= 6.0
-```
-
-## Author
-
-**Ada Yang** — adayang.chun@gmail.com
+**Data Efficiency Ablation**
+An ablation study trains all five strategies on 10%, 50%, and 100% of the SST-2 training set for 3 epochs each, producing learning curves that show how quickly each strategy reaches competitive accuracy as labeled data increases. This reveals which approaches are most suitable when labeled data is scarce.
