@@ -1,0 +1,6 @@
+experiment_name: "frozen_6_layers"
+strategy:
+  type: "frozen"
+  learning_rate: 2.0e-5
+  freeze_embeddings: true
+  freeze_encoder_layers: 6

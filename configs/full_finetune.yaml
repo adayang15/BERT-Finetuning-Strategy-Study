@@ -1,0 +1,4 @@
+experiment_name: "full_finetune"
+strategy:
+  type: "full"
+  learning_rate: 2.0e-5

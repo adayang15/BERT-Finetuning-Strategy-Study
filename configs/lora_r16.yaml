@@ -1,0 +1,7 @@
+experiment_name: "lora_r16"
+strategy:
+  type: "lora"
+  learning_rate: 2.0e-5
+  lora_r: 16
+  lora_alpha: 32
+  lora_target: ["query", "value"]
