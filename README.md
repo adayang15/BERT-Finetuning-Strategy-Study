@@ -1,4 +1,4 @@
-# BERT-Finetuning-Strategy-Study
+# BERT Finetuning Strategy Study
 
 Empirical comparison of five fine-tuning strategies for BERT on the SST-2 binary sentiment classification task. The study benchmarks full fine-tuning against two layer-freezing variants and two LoRA configurations, examining the trade-offs between trainable parameter count, classification accuracy, and data efficiency.
 
